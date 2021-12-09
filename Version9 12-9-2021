@@ -1,0 +1,224 @@
+Option Explicit
+' https://riptutorial.com/vba/example/27772/internet-explorer-object
+' http://automatetheweb.net/vba-getelementsbytagname-method/
+' https://developer.mozilla.org/en-US/docs/Web/HTML/Element
+
+    Public ie As InternetExplorer
+    Public RowA, i, BrowserCount As Integer
+    Public PercentCompleted As Single
+    Public sSiteName, TrackingNumber, Carrier, Status1, Date1, Location1, Scrapped4, OpenIEapp As String
+    Public MyWb As Workbook
+Public Ohdoc As HTMLDocument
+    
+    
+Sub MasterRun_Status()
+'ActiveWorkbook.Sheets(2).Activate
+Worksheets("Main").Range("I14") = "Processing..."
+Worksheets("Main").Range("I15") = 0
+Application.ScreenUpdating = False
+Application.DisplayAlerts = True
+Application.Calculation = xlManual   ' xlManual
+Dim xTable As ListObject
+On Error Resume Next
+
+Worksheets("Running Shipper Data").Range("AC2:AE99").ClearContents
+
+Set MyWb = ThisWorkbook
+Set ie = CreateObject("internetExplorer.Application")
+Set xTable = Worksheets("Running Shipper Data").ListObjects("Table3")
+TableRows = xTable.Range.Rows.Count
+BrowserCount = 0
+
+Worksheets("Main").Range("I14") = "Processing..."
+Worksheets("Main").Range("I15") = 0
+
+    sSiteName = "https://yandex.com/"
+        ie.Navigate2 sSiteName
+        ie.Visible = True
+        Application.Wait (Now + TimeValue("00:00:01")) 'Wait 1 second, then check again.
+        Shell "RunDll32.exe InetCpl.Cpl, ClearMyTracksByProcess 11"
+        Shell "RunDll32.exe InetCpl.Cpl, ClearMyTracksByProcess 8"
+        Shell "RunDll32.exe InetCpl.Cpl, ClearMyTracksByProcess 2"
+        Shell "RunDll32.exe InetCpl.Cpl, ClearMyTracksByProcess 1"
+
+       If MsgBox("Please Confirm Internet Explorer Application is Open." & vbCr & "Do you wants to Proceed?", vbOKCancel, "Please Note!") = vbOK Then
+               ie.Visible = False
+           Else
+            'Statements to run when user clicks on Cancel button
+            MsgBox "Process cancelled"
+           GoTo EndAll
+        End If
+        
+        RowA = 2
+        For RowA = 2 To TableRows
+            TrackingNumber = Worksheets("Running Shipper Data").Range("L" & RowA)
+            Carrier = Worksheets("Running Shipper Data").Range("K" & RowA)
+            
+        If Carrier = "UPS" Then
+            
+            Call IEWebScrapeUPS
+            
+        ElseIf Carrier = "FedEx" Then
+            Call IEWebScrapeFEDEX
+                
+        ElseIf Carrier = "US Postal" Then
+            Call IEWebScrapeUSPS
+                
+        Else
+            
+        End If
+        
+        Status1 = Trim(WorksheetFunction.Clean(Status1))
+        Date1 = Trim(WorksheetFunction.Clean(Date1))
+        Location1 = Trim(WorksheetFunction.Clean(Location1))
+        Worksheets("Running Shipper Data").Range("AC" & RowA) = Status1
+        Worksheets("Running Shipper Data").Range("AD" & RowA) = Date1
+        Worksheets("Running Shipper Data").Range("AE" & RowA) = Location1
+        
+        Err.Clear
+        Status1 = ""
+        Date1 = ""
+        Location1 = ""
+        
+        If BrowserCount = 10 Then
+            ie.Quit 'close the application window
+            Set ie = Nothing
+            Application.Wait (Now + TimeValue("00:00:05")) 'Wait 1 second, then check again.
+            Shell "RunDll32.exe InetCpl.Cpl, ClearMyTracksByProcess 11"
+            Shell "RunDll32.exe InetCpl.Cpl, ClearMyTracksByProcess 8"
+            Shell "RunDll32.exe InetCpl.Cpl, ClearMyTracksByProcess 2"
+            Shell "RunDll32.exe InetCpl.Cpl, ClearMyTracksByProcess 1"
+            
+            Set ie = CreateObject("internetExplorer.Application")
+            Application.Wait (Now + TimeValue("00:00:05"))
+            sSiteName = "https://yandex.com/"
+            ie.Visible = False
+            ie.Navigate2 sSiteName
+            BrowserCount = 0
+            PercentCompleted = Round(RowA / TableRows, 2)
+            Application.ScreenUpdating = True
+            Worksheets("Main").Range("I15") = PercentCompleted
+            Application.ScreenUpdating = False
+        End If
+        
+        BrowserCount = BrowserCount + 1
+        
+Next RowA
+
+EndAll:
+
+    ie.Quit 'close the application window
+    Set ie = Nothing
+    Worksheets("Main").Range("I14").ClearContents
+    Worksheets("Main").Range("I15") = "Update Complete"
+ActiveWorkbook.Sheets(1).Activate
+Application.ScreenUpdating = True
+Application.DisplayAlerts = True
+Application.Calculation = xlAutomatic   ' xlManual
+End Sub
+
+
+Sub IEWebScrapeUPS()
+Dim Pcount As Integer
+On Error GoTo InCaseofError:
+
+sSiteName = "https://wwwapps.ups.com/WebTracking/processInputRequest?%20%0bHTMLVersion=5.0&loc=en_CA&Requester=UPSHome&tracknum=" _
+& TrackingNumber & "%20%0b&AgreeToTermsAndConditions=yes&ignore=&track.x=22&track.y=6/trackdetails"
+
+ie.Navigate2 sSiteName
+Application.Wait (Now + TimeValue("00:00:03"))
+
+Set Ohdoc = ie.document
+'Debug.Print Ohdoc.getElementsByTagName("p").Length
+Pcount = Ohdoc.getElementsByTagName("p").Length
+
+If Pcount > 0 Then
+    Date1 = Ohdoc.getElementsByTagName("p").Item(4).innerText
+    If InStr(":", Date1) > 0 Then
+        Date1 = Mid(Date1, 1, WorksheetFunction.Search(":", Date1) + 2)
+    End If
+    Status1 = Ohdoc.getElementsByTagName("p").Item(5).innerText
+    Location1 = Ohdoc.getElementsByTagName("p").Item(6).innerText
+Else
+    Status1 = "Error: Missing Data"
+End If
+
+InCaseofError:
+If Err.Number <> 0 Then
+    Status1 = "Error: Info Not Available"
+End If
+
+Pcount = 0
+End Sub
+
+
+Sub IEWebScrapeFEDEX()
+Dim WebPage As String
+Dim Pcount, X As Integer
+On Error GoTo InCaseofError:
+    
+    sSiteName = "https://www.fedex.com/fedextrack/?trknbr=" & TrackingNumber & "&trkqual=12022~" & TrackingNumber & "~FDEG"
+    ie.Navigate2 sSiteName
+    'ie.Visible = True
+    Application.Wait (Now + TimeValue("00:00:03"))
+    
+    Set Ohdoc = ie.document
+    'Debug.Print Ohdoc.getElementsByTagName("div").Length
+        
+    Pcount = Ohdoc.getElementsByTagName("div").Length
+Dim MyArray(211) As Variant
+
+If Pcount > 0 Then
+    For i = 1 To (211)
+        Status1 = Ohdoc.getElementsByTagName("div").Item(i).innerText
+        MyArray(i) = Trim(Application.Clean(Status1))
+        ' Debug.Print MyArray(i)
+    Next i
+    
+    Status1 = MyArray(122)
+    Status1 = Trim(Application.Clean(Status1))
+    Date1 = MyArray(90)
+    Date1 = Mid(Date1, 82, 99)
+    Date1 = Mid(Date1, 1, WorksheetFunction.Search("am", Date1) + 1)
+    Location1 = MyArray(139)
+Else
+    Status1 = "Error: Missing Data"
+End If
+    
+InCaseofError:
+If Err.Number <> 0 Then
+    Status1 = "Error: Info Not Available"
+End If
+
+Pcount = 0
+End Sub
+
+
+Sub IEWebScrapeUSPS()
+Dim Pcount, X As Integer
+
+On Error Resume Next
+sSiteName = "https://tools.usps.com/go/TrackConfirmAction_input?strOrigTrackNum=" & TrackingNumber
+ie.Navigate2 sSiteName
+Application.Wait (Now + TimeValue("00:00:03"))
+
+
+Set Ohdoc = ie.document
+'Debug.Print Ohdoc.getElementsByTagName("p").Length
+'Debug.Print Ohdoc.getElementsByTagName("p").Item
+'Debug.Print Ohdoc.getElementsByTagName("p").tags
+
+Pcount = Ohdoc.getElementsByTagName("p").Length
+
+If Pcount > 0 Then
+    Status1 = Ohdoc.getElementsByTagName("p").Item(18).innerText
+    Status1 = WorksheetFunction.Substitute(Status1, " ", ">", 4)
+    Status1 = Mid(Status1, 1, WorksheetFunction.Search(">", Status1) - 1)
+    Date1 = Ohdoc.getElementsByTagName("p").Item(19).innerText
+    Location1 = Ohdoc.getElementsByTagName("p").Item(20).innerText
+Else
+    Status1 = "Error: Missing Data"
+End If
+
+Pcount = 0
+End Sub
